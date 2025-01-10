@@ -1,0 +1,83 @@
+---
+import { Icon } from "astro-icon/components";
+
+type Props = {
+  postSlug: string;
+};
+
+const { postSlug } = Astro.props;
+---
+
+<RootElement data={{ postSlug }} class="group/like flex items-center gap-4">
+  <button
+    data-target="button"
+    class="w-[2.5em] h-[2.5em] bg-gradient-to-br from-slate-600 to-slate-900 rounded-full flex items-center justify-center"
+  >
+    <div
+      class="group-data-[liked]/like:w-[75%] group-data-[liked]/like:h-[75%] w-[85%] h-[85%] rounded-full bg-gradient-to-br from-slate-800 to-slate-600 text-xl font-bold grid place-items-center transition-all -translate-y-[8%] group-data-[liked]/like:translate-y-0 ease-spring-5 duration-500"
+    >
+      <Icon
+        name="heart"
+        class="row-start-1 col-start-1 transition-colors text-slate-300 group-data-[liked]/like:text-red-400"
+      />
+      <Icon
+        name="heart"
+        class="row-start-1 col-start-1 transition-colors text-slate-300 group-data-[liked]/like:text-red-400 blur-0 group-data-[liked]/like:blur-[2px]"
+      />
+    </div>
+  </button>
+  <p
+    data-target="text"
+    class="group-data-[pending]/like:opacity-60 transition-opacity"
+  >
+    -
+  </p>
+</RootElement>
+
+<script>
+  import { actions } from "astro:actions";
+  import { Signal } from "signal-polyfill";
+
+  RootElement.ready<{ postSlug: string }>(async ($, ctx) => {
+    const { postSlug } = ctx.data;
+    const pending = new Signal.State(false);
+    const liked = new Signal.State(
+      Boolean(localStorage.getItem(`isLike:${postSlug}`))
+    );
+
+    const { likes } = await actions.getLikes.orThrow({ postSlug });
+    $("text").textContent = likes.toString();
+
+    ctx.effect(() => {
+      $.self.toggleAttribute("data-liked", liked.get());
+      $.self.toggleAttribute("data-pending", pending.get());
+
+      if (liked.get()) {
+        localStorage.setItem(`isLike:${postSlug}`, "true");
+      } else {
+        localStorage.removeItem(`isLike:${postSlug}`);
+      }
+    });
+
+    $("button").addEventListener("click", async () => {
+      pending.set(true);
+      liked.set(!liked.get());
+
+      const { data, error } = await actions.like({
+        postSlug,
+        liked: liked.get(),
+      });
+
+      pending.set(false);
+      if (error) {
+        $("text").textContent =
+          error.code === "TOO_MANY_REQUESTS"
+            ? "Slow down! Rate limited you for the day."
+            : "Oops, failed to update likes.";
+        return;
+      }
+
+      $("text").textContent = data.likes.toString();
+    });
+  });
+</script>

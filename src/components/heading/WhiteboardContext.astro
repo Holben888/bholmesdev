@@ -1,0 +1,168 @@
+---
+import { scope } from "simple:scope";
+
+const html = Astro.slots.render("default", [scope]);
+---
+
+<RootElement class="group block">
+  <Fragment set:html={html} />
+</RootElement>
+
+<script>
+  import { gsap } from "gsap";
+  import { fisherYatesShuffle } from "~/utils.client";
+  import MotionPathPlugin from "gsap/MotionPathPlugin";
+  import { setUpCanvas } from "./canvas";
+  import { isDrawing } from "~/stores";
+
+  gsap.registerPlugin(MotionPathPlugin);
+
+  const xPoolInitial = [-30, -15, 0, 15, 30];
+  const yPoolInitial = [-80, -40, 0, 40, 80, 120];
+  const strokeOffset = 1624;
+
+  RootElement.ready(($, ctx) => {
+    isDrawing.set(false);
+
+    const xPool = fisherYatesShuffle(xPoolInitial);
+    const yPool = fisherYatesShuffle(yPoolInitial);
+    let xIdx = 0;
+    let yIdx = 0;
+    let resetCanvas: () => void | undefined;
+    let eraseAnim: gsap.core.Timeline | undefined;
+    let faceAnim = gsap.to($("face"), {
+      x: () => {
+        const next = xPool[xIdx];
+        xIdx = (xIdx + 1) % xPool.length;
+        return next!;
+      },
+      y: () => {
+        const next = yPool[yIdx];
+        yIdx = (yIdx + 1) % yPool.length;
+        return next!;
+      },
+      repeatRefresh: true,
+      repeat: -1,
+      repeatDelay: 4,
+      duration: 1,
+      delay: 4,
+      ease: "elastic.out(1, 0.5)",
+    });
+
+    let eyesAnim = gsap
+      .timeline()
+      .set($.all("eyes"), { transformOrigin: "center bottom" })
+      .to($.all("eyes"), { scaleY: 0.2, duration: 0.2 })
+      .to($.all("eyes"), { scaleY: 1, duration: 0.2 })
+      .repeatDelay(3)
+      .delay(2)
+      .repeat(-1);
+
+    const drawBtn = $.optional<HTMLButtonElement>("drawBtn");
+
+    ctx.effect(() => {
+      $.self.toggleAttribute("data-drawing", isDrawing.get());
+      if (drawBtn) {
+        drawBtn.disabled = isDrawing.get();
+      }
+    });
+
+    $.optional("draw-trigger")?.addEventListener("click", startDrawing);
+    $("canvas").addEventListener("click", startDrawing);
+    $("eraser").addEventListener("click", startDrawing);
+    $("markers").addEventListener("click", startDrawing);
+    $("closeBtn").addEventListener("click", stopDrawing);
+
+    function stopDrawing() {
+      if (!isDrawing.get()) return;
+      isDrawing.set(false);
+
+      if (resetCanvas) resetCanvas();
+      $("closeBtn").addEventListener(
+        "transitionend",
+        () => {
+          drawBtn?.focus();
+        },
+        { once: true }
+      );
+      eraseAnim?.kill();
+      gsap.to($("eraser"), { x: 0, y: 0, duration: 0.4 });
+      gsap.to($("scribble"), {
+        strokeDashoffset: strokeOffset,
+        duration: 0.3,
+        onComplete: () => {
+          faceAnim?.play();
+          eyesAnim?.play();
+        },
+      });
+    }
+
+    async function startDrawing() {
+      if (isDrawing.get()) return;
+      isDrawing.set(true);
+
+      $("closeBtn")?.addEventListener(
+        "transitionend",
+        () => {
+          $("closeBtn")?.focus();
+        },
+        { once: true }
+      );
+      faceAnim?.pause();
+      eyesAnim?.pause();
+
+      const mdBreakpoint = window.matchMedia("(max-width: 768px)");
+      if (mdBreakpoint.matches) {
+        // We scale up the whiteboard
+        // from the nav bar on smaller layouts.
+        // Wait for scaling to complete
+        // before calculating the eraser's position.
+        await new Promise((resolve) => setTimeout(() => resolve(null), 300));
+      }
+
+      const eraserRect = $("eraser").getBoundingClientRect();
+      const scribbleRect = $("face").getBoundingClientRect();
+
+      eraseAnim = gsap.timeline().to($("eraser"), {
+        x: -eraserRect.left + scribbleRect.left - 16,
+        y: -eraserRect.top + scribbleRect.top - 40,
+        ease: "elastic.out(1,1)",
+        duration: 0.4,
+      });
+      for (let i = 1; i <= 6; i++) {
+        eraseAnim.to($("eraser"), {
+          duration: 0.155,
+          delay: i === 1 ? -0.1 : 0,
+          ease: "power2.out",
+          motionPath: {
+            path: $<SVGPathElement>("scribble"),
+            align: $<SVGPathElement>("scribble"),
+            offsetX: eraserRect.width / -2,
+            offsetY: eraserRect.height / -2,
+
+            start: (i - 1) / 6,
+            end: i / 6,
+          },
+        });
+        eraseAnim.to(
+          $("scribble"),
+          {
+            ease: "power2.out",
+            duration: 0.16,
+            strokeDashoffset: strokeOffset - (strokeOffset * i) / 6,
+          },
+          "<"
+        );
+      }
+      eraseAnim.to($("eraser"), {
+        x: 0,
+        y: 0,
+        ease: "elastic.out(1,1)",
+        duration: 0.4,
+        onStart: () => {
+          resetCanvas = setUpCanvas($.self, $("canvas"));
+        },
+      });
+    }
+  });
+</script>
